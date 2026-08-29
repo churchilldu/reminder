@@ -1,0 +1,40 @@
+[package]
+name = "reminder-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Send reminders to the Windows Notification Center"
+
+[[bin]]
+name = "reminder"
+path = "src/main.rs"
+
+# Pinned to 0.58 on purpose -- do not bump without reading this.
+#
+# 0.59 and later link via `raw-dylib`, which on the x86_64-pc-windows-gnu
+# target makes rustc shell out to dlltool.exe to build import libraries.
+# dlltool in turn needs an assembler (as.exe), and rustup's self-contained
+# bundle ships neither, so the build dies with:
+#
+#     dlltool could not create import library ... CreateProcess
+#
+# 0.58 resolves to windows-targets 0.52.6, which ships prebuilt .a import
+# libraries and needs no dlltool at all. That keeps this buildable with
+# nothing but rustup -- no MSVC, no MSYS2, no MinGW.
+#
+# To upgrade, either install a full MinGW-w64 binutils first, or switch to
+# the msvc target and accept the Visual Studio dependency.
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Data_Xml_Dom",
+    "UI_Notifications",
+    "Win32_System_Com",
+    "Win32_System_Registry",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
