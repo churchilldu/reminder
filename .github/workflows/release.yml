@@ -12,6 +12,11 @@ on:
     branches: [ "release" ]
   workflow_dispatch:
 
+# The implicit GITHUB_TOKEN defaults to read-only; publishing a release needs
+# write access to release assets.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
