@@ -2,7 +2,7 @@
 //!
 //! A toast needs an image *file* -- it cannot reference an icon inside a DLL --
 //! so rather than ship binary assets the four icons are drawn on first use and
-//! cached under %LOCALAPPDATA%\reminder-rs\icons.
+//! cached under %LOCALAPPDATA%\reminder\icons.
 
 use std::env;
 use std::fs;
@@ -24,7 +24,7 @@ fn data_dir() -> PathBuf {
     let base = env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(env::temp_dir);
-    base.join("reminder-rs")
+    base.join("reminder")
 }
 
 fn icon_cache_dir() -> PathBuf {
