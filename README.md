@@ -87,6 +87,7 @@ reminder "Pipeline failed" \
 | File | What's in it |
 |---|---|
 | `src/main.rs` | CLI parsing and the send loop |
+| `src/appid.rs` | Own AppUserModelId registration via a Start Menu shortcut |
 | `src/toast.rs` | Toast XML builder and the WinRT call that shows it |
 | `src/level.rs` | The four severity levels: colour, glyph, sound |
 | `src/icon.rs` | Draws and caches the level icons |
@@ -116,10 +117,14 @@ RGBA, anti-aliased disc + glyph) and cached at
 `%LOCALAPPDATA%\reminder\icons`. First draw is a few dozen milliseconds;
 subsequent runs hit the cache in under a millisecond.
 
-**AppID.** Toasts are shown under PowerShell's AppID, which Windows already
-trusts. That avoids needing a Start Menu shortcut or an `AppUserModelId`
-registry entry. The cost is that Action Center attributes toasts to PowerShell.
-`--app-id` overrides this.
+**AppID.** Toasts are shown under our own AppUserModelId (`Reminder.App`), not
+PowerShell's. On first use the app registers that identity by creating a Start
+Menu shortcut at `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Reminder.lnk`
+stamped with the `System.AppUserModel.ID` property -- the documented requirement
+for an unpackaged app to own a notification identity. The result: Action Center
+shows **"Reminder"** as the sender instead of "Windows PowerShell". See
+`appid.rs`. `--app-id` overrides the identity. Manage the registration explicitly
+with `--register` / `--unregister`.
 
 **XML element order.** The toast schema requires `visual`, then `audio`, then
 `actions`. An out-of-order payload is silently dropped by Windows.
@@ -135,6 +140,8 @@ malformed XML if `'` is left bare.
   registered `reminder://` URI scheme and a token store. The native equivalent
   is an `INotificationActivationCallback` COM activator. `windows-implement
   0.58` is already a transitive dependency, so this is a natural next step.
-- **AppID.** Using PowerShell's AppID means Action Center shows "Windows
-  PowerShell" as the sender. Registering a proper AppID requires either a Start
-  Menu shortcut or an `AppUserModelId` registry entry pointing at the exe.
+- **AppID registration.** The identity shortcut is created once, on first use.
+  If the exe is subsequently moved, the shortcut still points at the old
+  location; delete it (or run `reminder --unregister` then `--register`) to
+  re-register at the new path. Registration writes one `Reminder.lnk` file into
+  the current user's Start Menu.
