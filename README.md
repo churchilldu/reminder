@@ -1,34 +1,8 @@
 # reminder
 
-A native Windows Notification Center reminder tool, and a port of
-[`reminder.py`](../reminder.py) in the parent directory.
+A native Windows Notification Center reminder tool.
 
 ## Motivation
-
-`reminder.py` drives the Windows toast API by shelling out to PowerShell.
-That works, but every notification pays a fixed process-startup cost:
-
-| Implementation | Mechanism | Median latency (7 runs, warm cache) |
-|---|---|---|
-| `reminder.py` | Python → PowerShell subprocess → WinRT | **335 ms** |
-| `reminder.exe` | Direct WinRT call | **28 ms** |
-
-**11.8× faster, 307 ms saved per notification.**
-
-The overhead matters less for one-off reminders than for tools like
-`pipeline.py`, which fires a toast at the end of a CI run and then exits.
-The PowerShell cold-start (≈150 ms) and Python cold-start (≈34 ms) are both
-real costs there.
-
-Beyond latency, calling WinRT directly removes two layers of indirection that
-neither add features nor improve reliability. `reminder.py` also had to carry
-a fairly elaborate workaround: because it borrows PowerShell's AppID, foreground
-and background COM activation both dispatch to PowerShell rather than back to the
-script. That's why `reminder.py` has a `reminder://` URI scheme, a token-keyed
-action store, TTL pruning, and traversal guards — all infrastructure that exists
-only to route a notification click back into the right process. A native binary
-with its own AppID would remove all of that. `reminder.exe` doesn't implement the
-COM activator yet (see [Limitations](#limitations)), but it's the right foundation.
 
 ## Building
 
@@ -53,7 +27,7 @@ crate as its only dependency.
 
 ## Usage
 
-```
+```text
 reminder <message> [options]
 
 Options:
@@ -84,14 +58,14 @@ reminder "Pipeline failed" \
 
 ## Layout
 
-| File | What's in it |
-|---|---|
-| `src/main.rs` | CLI parsing and the send loop |
+| File           | What's in it                                              |
+| -------------- | --------------------------------------------------------- |
+| `src/main.rs`  | CLI parsing and the send loop                             |
 | `src/appid.rs` | Own AppUserModelId registration via a Start Menu shortcut |
-| `src/toast.rs` | Toast XML builder and the WinRT call that shows it |
-| `src/level.rs` | The four severity levels: colour, glyph, sound |
-| `src/icon.rs` | Draws and caches the level icons |
-| `src/png.rs` | Minimal PNG encoder (CRC-32, Adler-32, stored DEFLATE) |
+| `src/toast.rs` | Toast XML builder and the WinRT call that shows it        |
+| `src/level.rs` | The four severity levels: colour, glyph, sound            |
+| `src/icon.rs`  | Draws and caches the level icons                          |
+| `src/png.rs`   | Minimal PNG encoder (CRC-32, Adler-32, stored DEFLATE)    |
 
 No image crate. No arg-parser crate. `windows` is the only dependency, which
 is why the toolchain requirement stays minimal.
@@ -104,12 +78,12 @@ severity-adjacent attribute, `scenario="urgent"`, is Windows 11 only
 and an unrecognised value risks the payload being silently dropped. So each
 level is expressed via a procedurally-drawn icon plus a system sound:
 
-| Level | Colour | Sound |
-|---|---|---|
-| info | blue | `Notification.Default` |
-| success | green | `Notification.Default` |
-| warning | amber | `Notification.Reminder` |
-| error | red | `Notification.Looping.Alarm2` |
+| Level   | Colour | Sound                         |
+| ------- | ------ | ----------------------------- |
+| info    | blue   | `Notification.Default`        |
+| success | green  | `Notification.Default`        |
+| warning | amber  | `Notification.Reminder`       |
+| error   | red    | `Notification.Looping.Alarm2` |
 
 **Icons.** A toast needs an image file — it cannot reference an icon inside a
 DLL. Rather than ship binary assets, the four icons are drawn at runtime (96×96
@@ -136,10 +110,7 @@ malformed XML if `'` is left bare.
 ## Limitations
 
 - **Click callbacks.** `--url` and `--button` open a URL via protocol
-  activation, but cannot run a local command. `reminder.py` handles this with a
-  registered `reminder://` URI scheme and a token store. The native equivalent
-  is an `INotificationActivationCallback` COM activator. `windows-implement
-  0.58` is already a transitive dependency, so this is a natural next step.
+  activation, but cannot run a local command.
 - **AppID registration.** The identity shortcut is created once, on first use.
   If the exe is subsequently moved, the shortcut still points at the old
   location; delete it (or run `reminder --unregister` then `--register`) to
