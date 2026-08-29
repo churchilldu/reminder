@@ -33,7 +33,7 @@ const ERROR_SUCCESS: WIN32_ERROR = WIN32_ERROR(0);
 
 pub const SCHEME: &str = "reminder";
 const ACTION_HOST: &str = "run";
-const REGISTRY_DESCRIPTION: &str = "URL:reminder-rs action";
+const REGISTRY_DESCRIPTION: &str = "URL:reminder action";
 
 /// How long a stored action stays usable. 7 days: long enough to click a toast
 /// from Action Center the next day, short enough that the store doesn't grow
@@ -49,7 +49,7 @@ fn data_dir() -> PathBuf {
     let base = env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(env::temp_dir);
-    base.join("reminder-rs")
+    base.join("reminder")
 }
 
 fn actions_dir() -> PathBuf {

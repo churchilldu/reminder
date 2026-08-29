@@ -1,4 +1,4 @@
-# reminder-rs
+# reminder
 
 A native Windows Notification Center reminder tool, and a port of
 [`reminder.py`](../reminder.py) in the parent directory.
@@ -113,7 +113,7 @@ level is expressed via a procedurally-drawn icon plus a system sound:
 **Icons.** A toast needs an image file — it cannot reference an icon inside a
 DLL. Rather than ship binary assets, the four icons are drawn at runtime (96×96
 RGBA, anti-aliased disc + glyph) and cached at
-`%LOCALAPPDATA%\reminder-rs\icons`. First draw is a few dozen milliseconds;
+`%LOCALAPPDATA%\reminder\icons`. First draw is a few dozen milliseconds;
 subsequent runs hit the cache in under a millisecond.
 
 **AppID.** Toasts are shown under PowerShell's AppID, which Windows already

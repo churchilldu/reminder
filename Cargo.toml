@@ -1,5 +1,5 @@
 [package]
-name = "reminder-rs"
+name = "reminder"
 version = "0.1.0"
 edition = "2021"
 description = "Send reminders to the Windows Notification Center"
