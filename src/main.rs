@@ -7,6 +7,7 @@
 //! Only dependency is the `windows` crate. The PNG encoder for the level icons
 //! is in png.rs precisely so that stays true.
 
+mod appid;
 mod callback;
 mod icon;
 mod level;
@@ -23,18 +24,18 @@ use windows::Win32::System::Com::CoIncrementMTAUsage;
 
 use toast::Toast;
 
-/// AppID borrowed from PowerShell, which Windows already trusts. Registering
-/// our own would mean a Start Menu shortcut or an AppUserModelId registry
-/// entry; borrowing a known-good one keeps this a drop-in tool. Override with
-/// --app-id once you have an identity of your own.
-const DEFAULT_APP_ID: &str =
-    r"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe";
+/// Default AppUserModelId: our own registered identity, so Action Center
+/// shows "Reminder" instead of "Windows PowerShell". Registered by the
+/// Start Menu shortcut in appid.rs. Override with --app-id for a custom one.
+const DEFAULT_APP_ID: &str = appid::AUMID;
 
 const USAGE: &str = "\
 Send a reminder to the Windows Notification Center.
 
 Usage:
     reminder <message> [options]
+    reminder --register
+    reminder --unregister
     reminder --register-protocol
     reminder --unregister-protocol
     reminder --protocol-status
@@ -58,6 +59,11 @@ Options:
     --print-xml           Print the payload instead of sending it
     -h, --help            Show this help
     -V, --version         Show the version
+
+App identity:
+    Reminders show in Action Center under your own identity (\"Reminder\"),
+    registered via a Start Menu shortcut on first use -- no PowerShell sender.
+    --register / --unregister manage that registration explicitly.
 
 Click callbacks:
     --on-click stores the command locally and puts an unguessable token in the
@@ -101,6 +107,8 @@ enum Parsed {
     Run(Args),
     Help,
     Version,
+    Register,
+    Unregister,
     RegisterProtocol,
     UnregisterProtocol,
     ProtocolStatus,
@@ -143,6 +151,8 @@ fn parse_args(argv: Vec<String>) -> Result<Parsed, UsageError> {
         match arg.as_str() {
             "-h" | "--help" => return Ok(Parsed::Help),
             "-V" | "--version" => return Ok(Parsed::Version),
+            "--register" => return Ok(Parsed::Register),
+            "--unregister" => return Ok(Parsed::Unregister),
             "--register-protocol" => return Ok(Parsed::RegisterProtocol),
             "--unregister-protocol" => return Ok(Parsed::UnregisterProtocol),
             "--protocol-status" => return Ok(Parsed::ProtocolStatus),
@@ -306,6 +316,18 @@ fn run(args: Args) -> ExitCode {
         let _ = CoIncrementMTAUsage();
     }
 
+    // When not overridden, use our own AppUserModelId: make sure its identity
+    // shortcut exists and point this process at it, so Action Center shows
+    // "Reminder" instead of "Windows PowerShell". Registration is one-time.
+    if args.app_id == DEFAULT_APP_ID {
+        if let Err(e) = appid::ensure_registered() {
+            eprintln!("warning: could not register AppUserModelId: {e}");
+        }
+        if let Err(e) = appid::set_process_aumid() {
+            eprintln!("warning: could not set process AppUserModelId: {e}");
+        }
+    }
+
     if args.delay > 0 {
         println!("Waiting {}s before reminding...", args.delay);
         thread::sleep(Duration::from_secs(args.delay));
@@ -357,6 +379,26 @@ fn main() -> ExitCode {
             println!("reminder {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        Ok(Parsed::Register) => match appid::register() {
+            Ok(()) => {
+                println!("Registered AppUserModelId '{}' (Start Menu shortcut).", appid::AUMID);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Ok(Parsed::Unregister) => match appid::unregister() {
+            Ok(()) => {
+                println!("Unregistered AppUserModelId '{}'.", appid::AUMID);
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Ok(Parsed::RegisterProtocol) => {
             match callback::register_protocol() {
                 Ok(()) => {
