@@ -116,3 +116,7 @@ malformed XML if `'` is left bare.
   location; delete it (or run `reminder --unregister` then `--register`) to
   re-register at the new path. Registration writes one `Reminder.lnk` file into
   the current user's Start Menu.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
