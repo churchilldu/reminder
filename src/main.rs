@@ -381,7 +381,10 @@ fn main() -> ExitCode {
         }
         Ok(Parsed::Register) => match appid::register() {
             Ok(()) => {
-                println!("Registered AppUserModelId '{}' (Start Menu shortcut).", appid::AUMID);
+                println!(
+                    "Registered AppUserModelId '{}' (Start Menu shortcut).",
+                    appid::AUMID
+                );
                 ExitCode::SUCCESS
             }
             Err(e) => {

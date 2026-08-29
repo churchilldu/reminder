@@ -70,8 +70,10 @@ pub fn register() -> Result<(), String> {
 
         link.SetPath(PCWSTR(exe_wide.as_mut_ptr()))
             .map_err(|e| format!("cannot set shortcut target: {e}"))?;
-        link.SetDescription(PCWSTR(wide("Reminder - native Windows notification reminder").as_mut_ptr()))
-            .map_err(|e| format!("cannot set shortcut description: {e}"))?;
+        link.SetDescription(PCWSTR(
+            wide("Reminder - native Windows notification reminder").as_mut_ptr(),
+        ))
+        .map_err(|e| format!("cannot set shortcut description: {e}"))?;
 
         // Stamp the AppUserModelID property onto the shortcut.
         let prop_store: IPropertyStore = link
@@ -103,7 +105,8 @@ pub fn unregister() -> Result<(), String> {
         return Ok(());
     };
     if lnk.exists() {
-        fs::remove_file(&lnk).map_err(|e| format!("cannot remove shortcut {}: {e}", lnk.display()))?;
+        fs::remove_file(&lnk)
+            .map_err(|e| format!("cannot remove shortcut {}: {e}", lnk.display()))?;
     }
     Ok(())
 }
