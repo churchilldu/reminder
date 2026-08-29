@@ -1,0 +1,36 @@
+#!/bin/sh
+# Pre-commit hook: keep Rust source auto-formatted.
+#
+# Runs `cargo fmt --all` to format the code base before every commit. Wired up
+# via `git config core.hooksPath .githooks` -- keep that config in sync when
+# moving this file.
+#
+# If cargo (or the GNU toolchain it must run under) is unavailable the hook
+# warns and lets the commit through rather than blocking. Use RUSTUP_TOOLCHAIN
+# to pin the toolchain if the machine's default differs from the project's.
+
+set -u
+
+# Locate cargo: honour an explicit CARGO, else PATH, else the default rustup
+# install path.
+if [ -z "${CARGO:-}" ]; then
+    if command -v cargo >/dev/null 2>&1; then
+        CARGO=$(command -v cargo)
+    elif [ -x "$HOME/.cargo/bin/cargo" ]; then
+        CARGO="$HOME/.cargo/bin/cargo"
+    fi
+fi
+
+if [ -z "${CARGO:-}" ]; then
+    echo "pre-commit: cargo not found; skipping rustfmt." >&2
+    exit 0
+fi
+
+"$CARGO" fmt --all
+status=$?
+if [ "$status" -ne 0 ]; then
+    echo "pre-commit: 'cargo fmt --all' failed (exit $status); commit aborted." >&2
+    exit "$status"
+fi
+
+exit 0
