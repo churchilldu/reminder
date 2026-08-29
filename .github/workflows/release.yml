@@ -1,0 +1,64 @@
+name: Release
+
+# Builds the Windows GNU release binary and publishes a GitHub Release.
+#
+# The project deliberately targets x86_64-pc-windows-gnu (see Cargo.toml: the
+# windows crate is pinned to 0.58 because newer versions need dlltool, which
+# rustup's self-contained GNU toolchain does not ship). We therefore use the
+# exact toolchain the README documents -- no MSVC, MSYS2, or MinGW needed.
+
+on:
+  push:
+    branches: [ "release" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable GNU toolchain)
+        run: rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-gnu-release
+
+      - name: Build release
+        env:
+          RUSTUP_TOOLCHAIN: stable-x86_64-pc-windows-gnu
+        run: cargo build --release
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "version=$(sed -n 's/^version = \"\(.*\)\"/\1/p' Cargo.toml | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Stage artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/reminder.exe "dist/reminder-v${{ steps.version.outputs.version }}-x86_64-pc-windows-gnu.exe"
+          ls -la dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "reminder v${{ steps.version.outputs.version }}"
+          body: |
+            Native Windows Notification Center reminder (`reminder`).
+
+            - Sends reminders to Windows Action Center as **"Reminder"** (own AppUserModelId).
+            - Levels: info / success / warning / error (runtime-drawn icons + sounds).
+            - URL/button actions, `--on-click` local commands, repeats, scheduling.
+          files: |
+            dist/reminder-v${{ steps.version.outputs.version }}-x86_64-pc-windows-gnu.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
