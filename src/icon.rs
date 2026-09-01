@@ -50,29 +50,116 @@ fn segment_distance(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32) -> f32
 }
 
 /// The strokes and dots making up a glyph, in the 96px design space.
-fn glyph_shapes(glyph: Glyph) -> (Vec<Stroke>, Vec<Dot>) {
+///
+/// `solid` is an optional rounded triangle (apex, base-left, base-right,
+/// corner radius) that the strokes and dots are cut *out of*; without one
+/// the strokes and dots simply union as usual.
+fn glyph_shapes(
+    glyph: Glyph,
+) -> (
+    Option<([f32; 2], [f32; 2], [f32; 2], f32)>,
+    Vec<Stroke>,
+    Vec<Dot>,
+) {
     match glyph {
         Glyph::Cross => (
+            None,
             vec![(33.0, 33.0, 63.0, 63.0, 4.5), (63.0, 33.0, 33.0, 63.0, 4.5)],
             vec![],
         ),
         Glyph::Check => (
+            None,
             vec![(29.0, 49.0, 42.0, 63.0, 4.5), (42.0, 63.0, 68.0, 33.0, 4.5)],
             vec![],
         ),
-        Glyph::Bang => (vec![(48.0, 25.0, 48.0, 55.0, 4.5)], vec![(48.0, 69.0, 5.5)]),
-        Glyph::Info => (vec![(48.0, 44.0, 48.0, 71.0, 4.5)], vec![(48.0, 28.0, 5.5)]),
+        Glyph::Triangle => (
+            // A solid warning triangle shaped like the classic important
+            // sign (e.g. the notify-send "important" icon): taller than wide,
+            // corners rounded, "!" cut out. The unrounded corners sit inside
+            // the disc (furthest point 43px from centre against a 46px
+            // disc radius); the rounded shape never reaches further.
+            Some(([48.0, 5.0], [13.0, 71.0], [83.0, 71.0], 5.0)),
+            vec![(48.0, 24.8, 48.0, 45.9, 4.0)],
+            vec![(48.0, 57.8, 4.0)],
+        ),
+        Glyph::Info => (
+            None,
+            vec![(48.0, 44.0, 48.0, 71.0, 4.5)],
+            vec![(48.0, 28.0, 5.5)],
+        ),
     }
 }
 
-/// Draw a filled disc in `colour` with a white glyph on top, returning PNG bytes.
-fn render(colour: (u8, u8, u8), glyph: Glyph) -> Vec<u8> {
+/// Shortest signed distance to triangle `abc`: negative inside.
+fn sd_triangle(px: f32, py: f32, a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f32 {
+    let (e0x, e0y) = (b[0] - a[0], b[1] - a[1]);
+    let (e1x, e1y) = (c[0] - b[0], c[1] - b[1]);
+    let (e2x, e2y) = (a[0] - c[0], a[1] - c[1]);
+    let (v0x, v0y) = (px - a[0], py - a[1]);
+    let (v1x, v1y) = (px - b[0], py - b[1]);
+    let (v2x, v2y) = (px - c[0], py - c[1]);
+
+    let proj = |vx: f32, vy: f32, ex: f32, ey: f32| -> (f32, f32) {
+        let t = ((vx * ex + vy * ey) / (ex * ex + ey * ey)).clamp(0.0, 1.0);
+        (vx - t * ex, vy - t * ey)
+    };
+    let (p0x, p0y) = proj(v0x, v0y, e0x, e0y);
+    let (p1x, p1y) = proj(v1x, v1y, e1x, e1y);
+    let (p2x, p2y) = proj(v2x, v2y, e2x, e2y);
+
+    let s = (e0x * e2y - e0y * e2x).signum();
+    let d0 = (p0x * p0x + p0y * p0y, s * (v0x * e0y - v0y * e0x));
+    let d1 = (p1x * p1x + p1y * p1y, s * (v1x * e1y - v1y * e1x));
+    let d2 = (p2x * p2x + p2y * p2y, s * (v2x * e2y - v2y * e2x));
+    // Component-wise min, as in the original vec2 min: distance from the
+    // closest edge, sign from the most-negative cross term. (A point is
+    // inside the triangle iff it is inside all three edge half-planes, so
+    // the sign stays correct even where two edges are equidistant at a
+    // corner -- lexicographic tuple comparison flips the sign there.)
+    let dx = d0.0.min(d1.0).min(d2.0);
+    let dy = d0.1.min(d1.1).min(d2.1);
+    -dx.sqrt() * dy.signum()
+}
+
+/// Signed distance to a rounded triangle: each vertex is pulled in along its
+/// angle bisector so every edge moves inward by `round`, then the result is
+/// expanded by `round`, so the corners become arcs of radius `round` while
+/// the straight edges land back on the original ones. Negative inside.
+fn sd_rounded_triangle(px: f32, py: f32, a: [f32; 2], b: [f32; 2], c: [f32; 2], round: f32) -> f32 {
+    let shrink = |v: [f32; 2], w: [f32; 2], u: [f32; 2]| -> [f32; 2] {
+        let (e1x, e1y) = (w[0] - v[0], w[1] - v[1]);
+        let (e2x, e2y) = (u[0] - v[0], u[1] - v[1]);
+        let l1 = (e1x * e1x + e1y * e1y).sqrt();
+        let l2 = (e2x * e2x + e2y * e2y).sqrt();
+        let (u1x, u1y) = (e1x / l1, e1y / l1);
+        let (u2x, u2y) = (e2x / l2, e2y / l2);
+        let cos_th = (u1x * u2x + u1y * u2y).clamp(-1.0, 1.0);
+        let sin_half = ((1.0 - cos_th) / 2.0).sqrt();
+        let (bx, by) = (u1x + u2x, u1y + u2y);
+        let bl = (bx * bx + by * by).sqrt();
+        let d = round / sin_half;
+        [v[0] + (bx / bl) * d, v[1] + (by / bl) * d]
+    };
+    sd_triangle(px, py, shrink(a, b, c), shrink(b, a, c), shrink(c, a, b)) - round
+}
+
+/// Paint a filled disc in `colour` with a white glyph on top, returning
+/// straight RGBA bytes. Split out of render() so tests can inspect pixels.
+fn paint_level(colour: (u8, u8, u8), glyph: Glyph) -> Vec<u8> {
     let n = ICON_SIZE;
     let centre = n as f32 / 2.0;
     let disc_radius = n as f32 / 2.0 - 2.0;
     let scale = n as f32 / 96.0;
 
-    let (strokes, dots) = glyph_shapes(glyph);
+    let (solid, strokes, dots) = glyph_shapes(glyph);
+    let solid: Option<([f32; 2], [f32; 2], [f32; 2], f32)> = solid.map(|(a, b, c, r)| {
+        (
+            [a[0] * scale, a[1] * scale],
+            [b[0] * scale, b[1] * scale],
+            [c[0] * scale, c[1] * scale],
+            r * scale,
+        )
+    });
     let strokes: Vec<Stroke> = strokes
         .into_iter()
         .map(|(a, b, c, d, t)| (a * scale, b * scale, c * scale, d * scale, t * scale))
@@ -96,15 +183,22 @@ fn render(colour: (u8, u8, u8), glyph: Glyph) -> Vec<u8> {
                 continue;
             }
 
-            // White glyph coverage: the union of every stroke and dot.
-            let mut ink: f32 = 0.0;
+            // White glyph coverage: the union of every stroke and dot -- or,
+            // for a solid shape, the shape with those cut out of it.
+            let mut cut: f32 = 0.0;
             for &(x0, y0, x1, y1, half) in &strokes {
-                ink = ink.max(coverage(segment_distance(px, py, x0, y0, x1, y1), half));
+                cut = cut.max(coverage(segment_distance(px, py, x0, y0, x1, y1), half));
             }
             for &(dx, dy, r) in &dots {
                 let d = ((px - dx).powi(2) + (py - dy).powi(2)).sqrt();
-                ink = ink.max(coverage(d, r));
+                cut = cut.max(coverage(d, r));
             }
+            let ink = match &solid {
+                Some((a, b, c, round)) => {
+                    coverage(sd_rounded_triangle(px, py, *a, *b, *c, *round), 0.0) * (1.0 - cut)
+                }
+                None => cut,
+            };
 
             // Composite white over the level colour, then apply the disc's alpha.
             let mix = |c: u8| (c as f32 + (255.0 - c as f32) * ink).round() as u8;
@@ -112,7 +206,12 @@ fn render(colour: (u8, u8, u8), glyph: Glyph) -> Vec<u8> {
         }
     }
 
-    png::encode_rgba(n, n, &pixels)
+    pixels
+}
+
+/// Draw a filled disc in `colour` with a white glyph on top, returning PNG bytes.
+fn render(colour: (u8, u8, u8), glyph: Glyph) -> Vec<u8> {
+    png::encode_rgba(ICON_SIZE, ICON_SIZE, &paint_level(colour, glyph))
 }
 
 /// Install `data` at `path` (write to a temporary name and rename, so a
@@ -143,12 +242,19 @@ fn cached(path: &Path, data: &[u8]) -> Option<PathBuf> {
     Some(path.to_path_buf())
 }
 
+/// Bump when a level icon's design changes: the cache key includes it, so
+/// an updated icon replaces the cached one instead of going stale.
+const LEVEL_ICON_VERSION: u32 = 6;
+
 /// Path to the cached icon for `level`, drawing it on first use.
 ///
 /// Returns None if the icon cannot be written. A toast without an icon is
 /// still perfectly useful, so this never fails the send.
 pub fn level_icon(level: &Level) -> Option<PathBuf> {
-    let path = icon_cache_dir().join(format!("{}-{ICON_SIZE}.png", level.name));
+    let path = icon_cache_dir().join(format!(
+        "{}-v{LEVEL_ICON_VERSION}-{ICON_SIZE}.png",
+        level.name
+    ));
     if fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false) {
         return Some(path);
     }
@@ -331,5 +437,63 @@ mod tests {
         assert!(centre[3] < 0.01, "centre should be transparent");
         let corner = &buf.data[0];
         assert!(corner[3] < 0.01, "corner should be transparent");
+    }
+
+    /// The SDF keeps the right sign at the ambiguous case: a point beyond a
+    /// corner is equidistant to the two edges meeting there, where a
+    /// lexicographic (distance, cross) comparison would pick the wrong sign.
+    #[test]
+    fn sd_triangle_stays_outside_beyond_corners() {
+        let a = [48.0f32, 5.0];
+        let b = [13.0, 71.0];
+        let c = [83.0, 71.0];
+        assert!(sd_triangle(48.5, 48.5, a, b, c) < 0.0, "centre is inside");
+        assert!(
+            sd_triangle(18.5, 82.5, a, b, c) > 0.0,
+            "beyond base-left corner is outside"
+        );
+        assert!(
+            sd_triangle(48.5, 1.5, a, b, c) > 0.0,
+            "beyond the apex is outside"
+        );
+        assert!(
+            sd_rounded_triangle(18.5, 82.5, a, b, c, 5.0) > 0.0,
+            "rounded: beyond corner is outside"
+        );
+        assert!(
+            sd_rounded_triangle(48.5, 48.5, a, b, c, 5.0) < 0.0,
+            "rounded: centre is inside"
+        );
+    }
+
+    /// The warning glyph is a solid triangle with an exclamation mark cut
+    /// out: white body, disc-coloured "!", transparent corner.
+    #[test]
+    fn warning_glyph_is_solid_with_cutout() {
+        let level = crate::level::by_name("warning").unwrap();
+        let px = paint_level(level.colour, level.glyph);
+        let at = |x: u32, y: u32| &px[((y * ICON_SIZE + x) * 4) as usize..][..4];
+        // Inside the triangle, clear of the "!": white.
+        for (x, y) in [(38, 40), (48, 16), (48, 70), (60, 50)] {
+            let p = at(x, y);
+            assert!(
+                p[0] > 250 && p[1] > 250 && p[2] > 250,
+                "({x},{y}) should be white, got {p:?}"
+            );
+        }
+        // The "!" bar and dot: disc colour, not white.
+        for (x, y) in [(48, 35), (48, 58)] {
+            let p = at(x, y);
+            assert!(p[0] < 245, "({x},{y}) should be cut out, got {p:?}");
+        }
+        // Beyond the triangle's base-left corner: disc colour, not a stray
+        // white sliver (regression for the SDF sign flip at corners).
+        let p = at(18, 82);
+        assert!(
+            p[0] < 245,
+            "(18,82) beyond the corner should be disc colour, got {p:?}"
+        );
+        // Disc corner: transparent.
+        assert!(at(0, 0)[3] < 8);
     }
 }

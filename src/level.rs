@@ -14,8 +14,9 @@ pub enum Glyph {
     Info,
     /// A tick.
     Check,
-    /// Exclamation mark: a bar above a dot.
-    Bang,
+    /// A solid upward warning triangle -- the classic important sign: taller
+    /// than wide, corners rounded, with an exclamation mark cut out of it.
+    Triangle,
     /// A cross.
     Cross,
 }
@@ -43,7 +44,7 @@ pub const LEVELS: &[Level] = &[
     Level {
         name: "warning",
         colour: (0xE8, 0xA1, 0x00),
-        glyph: Glyph::Bang,
+        glyph: Glyph::Triangle,
         sound: "ms-winsoundevent:Notification.Reminder",
     },
     Level {
