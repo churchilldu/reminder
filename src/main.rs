@@ -355,18 +355,9 @@ fn run(args: Args) -> ExitCode {
 
     let mut failed = false;
     for i in 0..args.repeat {
-        match payload.show(&args.app_id) {
-            Ok(()) => {
-                if args.repeat > 1 {
-                    println!("Sent ({}/{}): {}", i + 1, args.repeat, args.message);
-                } else {
-                    println!("Sent: {}", args.message);
-                }
-            }
-            Err(e) => {
-                eprintln!("Notification failed: {e}");
-                failed = true;
-            }
+        if let Err(e) = payload.show(&args.app_id) {
+            eprintln!("Notification failed: {e}");
+            failed = true;
         }
 
         if i + 1 < args.repeat {
