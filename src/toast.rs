@@ -4,6 +4,8 @@
 //! inside `<toast>` is fixed by the schema: visual, audio, then actions.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use windows::core::HSTRING;
 use windows::Data::Xml::Dom::XmlDocument;
@@ -61,6 +63,25 @@ pub struct Toast<'a> {
     /// (label, url) pairs rendered as buttons. Windows allows at most five.
     pub buttons: &'a [(String, String)],
     pub icon: Option<&'a Path>,
+    /// Explicit notification tag. When None, a unique tag is generated per
+    /// toast so Windows keeps every notification instead of replacing a
+    /// previous one with identical content.
+    pub tag: Option<&'a str>,
+}
+
+/// Monotonic counter so two toasts in the same nanosecond still differ.
+static TAG_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A unique tag for a toast that has none. Windows identifies notifications
+/// by tag: toasts from the same app with the same tag -- or, when no tag is
+/// given, identical content -- replace each other in Notification Center.
+/// A time-based tag makes every show() a distinct notification (max 64 chars).
+fn unique_tag() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{nanos}-{}", TAG_COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
 impl Toast<'_> {
@@ -122,6 +143,21 @@ impl Toast<'_> {
         document.LoadXml(&HSTRING::from(self.to_xml()))?;
 
         let notification = ToastNotification::CreateToastNotification(&document)?;
+
+        // Without a unique tag, Windows replaces a previous toast from this
+        // app that has the same content -- so three identical `reminder hi`
+        // invocations would collapse into one notification. Always tag each
+        // toast; an explicit --tag opts into replace-previous semantics.
+        let generated;
+        let tag: &str = match self.tag {
+            Some(tag) => tag,
+            None => {
+                generated = unique_tag();
+                &generated
+            }
+        };
+        notification.SetTag(&HSTRING::from(tag))?;
+
         let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(app_id))?;
         notifier.Show(&notification)
     }

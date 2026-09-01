@@ -52,6 +52,8 @@ Options:
                           Requires --register-protocol to have been run once.
     --button <LABEL=URL>  Add a clickable button (repeatable, max 5)
     --silent              Suppress the notification sound
+    --tag <text>          Notification tag; same tag replaces a previous toast
+                          from this app (default: unique per toast)
     --in <seconds>        Wait this long before the first reminder
     --repeat <n>          How many reminders to send (default: 1)
     --every <seconds>     Interval between repeats (default: 60)
@@ -100,6 +102,7 @@ struct Args {
     every: u64,
     app_id: String,
     print_xml: bool,
+    tag: Option<String>,
 }
 
 /// What to do after parsing: run, or handle a subcommand.
@@ -133,6 +136,7 @@ fn parse_args(argv: Vec<String>) -> Result<Parsed, UsageError> {
     let mut every: u64 = 60;
     let mut app_id = String::from(DEFAULT_APP_ID);
     let mut print_xml = false;
+    let mut tag: Option<String> = None;
 
     let mut it = argv.into_iter();
 
@@ -178,6 +182,7 @@ fn parse_args(argv: Vec<String>) -> Result<Parsed, UsageError> {
             "--silent" => silent = true,
             "--print-xml" => print_xml = true,
             "--app-id" => app_id = value(&mut it, "--app-id")?,
+            "--tag" => tag = Some(value(&mut it, "--tag")?),
             "--in" => delay = number(&value(&mut it, "--in")?, "--in")?,
             "--repeat" => repeat = number(&value(&mut it, "--repeat")?, "--repeat")?,
             "--every" => every = number(&value(&mut it, "--every")?, "--every")?,
@@ -254,6 +259,7 @@ fn parse_args(argv: Vec<String>) -> Result<Parsed, UsageError> {
         every,
         app_id,
         print_xml,
+        tag,
     }))
 }
 
@@ -302,6 +308,7 @@ fn run(args: Args) -> ExitCode {
         url: effective_url,
         buttons: &args.buttons,
         icon,
+        tag: args.tag.as_deref(),
     };
 
     if args.print_xml {
