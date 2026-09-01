@@ -386,6 +386,26 @@ fn main() -> ExitCode {
 
     if argv.is_empty() {
         print!("{USAGE}");
+
+        let args = Args {
+            message: String::from("No message given.\nUse `reminder --help` to see usage."),
+            title: String::from("Reminder"),
+            level: level::by_name("info").expect("info is a built-in level"),
+            icon: None,
+            app_icon: false,
+            url: None,
+            on_click: None,
+            buttons: Vec::new(),
+            silent: false,
+            delay: 0,
+            repeat: 1,
+            every: 60,
+            app_id: String::from(DEFAULT_APP_ID),
+            print_xml: false,
+            tag: Some(String::from("usage-error")),
+        };
+        run(args);
+
         return ExitCode::from(2);
     }
 
