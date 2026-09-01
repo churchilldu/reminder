@@ -75,6 +75,17 @@ pub fn register() -> Result<(), String> {
         ))
         .map_err(|e| format!("cannot set shortcut description: {e}"))?;
 
+        // Attach the app icon so Start Menu and Action Center show the
+        // doodle checklist instead of the generic exe glyph. Best-effort:
+        // the identity is the point of this function, the icon is only
+        // decoration, so a failure here costs a warning, not the register.
+        if let Some(ico) = crate::icon::app_icon_ico() {
+            let mut ico_wide = wide(ico.to_string_lossy().as_ref());
+            if let Err(e) = link.SetIconLocation(PCWSTR(ico_wide.as_mut_ptr()), 0) {
+                eprintln!("warning: could not attach the app icon: {e}");
+            }
+        }
+
         // Stamp the AppUserModelID property onto the shortcut.
         let prop_store: IPropertyStore = link
             .cast()

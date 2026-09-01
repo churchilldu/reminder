@@ -1,12 +1,12 @@
-//! Level icons, drawn procedurally and cached on disk.
+//! Level icons and the app icon, drawn procedurally and cached on disk.
 //!
 //! A toast needs an image *file* -- it cannot reference an icon inside a DLL --
-//! so rather than ship binary assets the four icons are drawn on first use and
-//! cached under %LOCALAPPDATA%\reminder\icons.
+//! so rather than ship binary assets the four level icons and the app icon are
+//! drawn on first use and cached under %LOCALAPPDATA%\reminder\icons.
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::level::{Glyph, Level};
 use crate::png;
@@ -115,41 +115,221 @@ fn render(colour: (u8, u8, u8), glyph: Glyph) -> Vec<u8> {
     png::encode_rgba(n, n, &pixels)
 }
 
-/// Path to the cached icon for `level`, drawing it on first use.
-///
-/// Returns None if the icon cannot be written. A toast without an icon is
-/// still perfectly useful, so this never fails the send.
-pub fn level_icon(level: &Level) -> Option<PathBuf> {
-    let dir = icon_cache_dir();
-    let path = dir.join(format!("{}-{}.png", level.name, ICON_SIZE));
-
-    let usable = fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false);
-    if usable {
-        return Some(path);
-    }
-
-    if let Err(e) = fs::create_dir_all(&dir) {
+/// Install `data` at `path` (write to a temporary name and rename, so a
+/// concurrent reader never sees a half-written file), returning the path if
+/// the file is usable afterwards.
+fn cached(path: &Path, data: &[u8]) -> Option<PathBuf> {
+    let dir = path.parent()?;
+    if let Err(e) = fs::create_dir_all(dir) {
         eprintln!("Could not create the icon cache: {e}");
         return None;
     }
 
-    // Write to a temporary name and rename, so a concurrent reader never sees
-    // a half-written file.
-    let data = render(level.colour, level.glyph);
-    let tmp = dir.join(format!("{}-{}.png.tmp", level.name, ICON_SIZE));
-    if let Err(e) = fs::write(&tmp, &data) {
-        eprintln!("Could not write the {} icon: {e}", level.name);
+    let tmp = dir.join(format!("{}.tmp", path.file_name()?.to_string_lossy()));
+    if let Err(e) = fs::write(&tmp, data) {
+        eprintln!("Could not write the icon: {e}");
         return None;
     }
-    if let Err(e) = fs::rename(&tmp, &path) {
+    if let Err(e) = fs::rename(&tmp, path) {
         // Another process may have won the race, in which case the icon is
         // already there and perfectly good.
-        if !fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false) {
-            eprintln!("Could not install the {} icon: {e}", level.name);
+        if !fs::metadata(path).map(|m| m.len() > 0).unwrap_or(false) {
+            eprintln!("Could not install the icon: {e}");
             return None;
         }
         let _ = fs::remove_file(&tmp);
     }
 
-    Some(path)
+    Some(path.to_path_buf())
+}
+
+/// Path to the cached icon for `level`, drawing it on first use.
+///
+/// Returns None if the icon cannot be written. A toast without an icon is
+/// still perfectly useful, so this never fails the send.
+pub fn level_icon(level: &Level) -> Option<PathBuf> {
+    let path = icon_cache_dir().join(format!("{}-{ICON_SIZE}.png", level.name));
+    if fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false) {
+        return Some(path);
+    }
+    cached(&path, &render(level.colour, level.glyph))
+}
+
+// ---------- The app icon ----------
+//
+// A hand-drawn reminder checklist: a wobbly periwinkle frame with one
+// deliberate sketch gap, and two coloured rings paired with bars of text.
+// Nothing else -- the background (including the inside of the frame) is
+// transparent. Everything is expressed in the same 96px design space as the
+// level icons and scaled to the requested size.
+
+/// Bump when the design changes: the cache key includes it, so an updated
+/// icon replaces the cached one instead of going stale.
+const APP_ICON_VERSION: u32 = 2;
+
+const PERIWINKLE: (u8, u8, u8) = (0x7B, 0x9B, 0xE0);
+const ORANGE: (u8, u8, u8) = (0xF5, 0xA5, 0x5E);
+const GREEN: (u8, u8, u8) = (0x55, 0xC9, 0xA6);
+
+/// Smooth, deterministic perturbation of at most ~0.9 design units. What
+/// makes an edge read as hand-drawn rather than CAD-drawn; the same seed
+/// always yields the same line, so the cache stays stable.
+fn wobble(x: f32, y: f32, seed: f32) -> f32 {
+    0.6 * (x * 0.11 + y * 0.07 + seed).sin() * (y * 0.09 - x * 0.05 + 1.7 * seed).sin()
+        + 0.3 * (x * 0.21 - y * 0.13 + 2.9 * seed).sin()
+}
+
+/// Signed distance to a (possibly rotated) rounded box, in design units.
+/// Negative inside.
+fn rbox(px: f32, py: f32, cx: f32, cy: f32, hw: f32, hh: f32, r: f32, rot: f32) -> f32 {
+    let (c, s) = (rot.cos(), rot.sin());
+    let (dx, dy) = (px - cx, py - cy);
+    let (rx, ry) = (dx * c + dy * s, -dx * s + dy * c);
+    let qx = rx.abs() - hw;
+    let qy = ry.abs() - hh;
+    (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt() + (qx.max(qy)).min(0.0) - r
+}
+
+/// Straight-alpha RGBA buffer in floats, so several anti-aliased layers can
+/// composite before the final quantization.
+struct Rgba {
+    data: Vec<[f32; 4]>,
+}
+
+impl Rgba {
+    fn new(n: u32) -> Self {
+        Rgba {
+            data: vec![[0.0; 4]; (n * n) as usize],
+        }
+    }
+
+    /// Porter-Duff "over": source colour with coverage `a` (0..1) onto pixel
+    /// `i`.
+    fn over(&mut self, i: usize, rgb: (u8, u8, u8), a: f32) {
+        if a <= 0.0 {
+            return;
+        }
+        let dst = &mut self.data[i];
+        let da = dst[3];
+        let out_a = a + da * (1.0 - a);
+        let inv = 1.0 / out_a;
+        dst[0] = (rgb.0 as f32 * a + dst[0] * da * (1.0 - a)) * inv;
+        dst[1] = (rgb.1 as f32 * a + dst[1] * da * (1.0 - a)) * inv;
+        dst[2] = (rgb.2 as f32 * a + dst[2] * da * (1.0 - a)) * inv;
+        dst[3] = out_a;
+    }
+
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.data.len() * 4);
+        for [r, g, b, a] in &self.data {
+            out.extend_from_slice(&[
+                r.clamp(0.0, 255.0).round() as u8,
+                g.clamp(0.0, 255.0).round() as u8,
+                b.clamp(0.0, 255.0).round() as u8,
+                (a * 255.0).round() as u8,
+            ]);
+        }
+        out
+    }
+}
+
+/// Paint the app icon into a buffer at `size` pixels. Split out of
+/// render_app() so tests can inspect the pixels.
+fn paint_app(size: u32) -> Rgba {
+    let n = size;
+    let scale = n as f32 / 96.0;
+    let mut buf = Rgba::new(n);
+
+    // The two list rows: a coloured ring (the "checkbox") and the y of the
+    // bar of text next to it.
+    let rows: [((u8, u8, u8), f32); 2] = [(ORANGE, 34.0), (GREEN, 62.0)];
+
+    for y in 0..n {
+        for x in 0..n {
+            // Pixel centre, mapped back into the 96px design space so the
+            // same geometry renders at any size.
+            let (px, py) = ((x as f32 + 0.5) / scale, (y as f32 + 0.5) / scale);
+            let i = (y * n + x) as usize;
+
+            // Rings and their bars of text.
+            for (row, (colour, cy)) in rows.iter().enumerate() {
+                let w = wobble(px, py, 3.0 + row as f32);
+                let dist = ((px - 31.0).powi(2) + (py - cy).powi(2)).sqrt();
+                let ring = coverage(dist + 0.5 * w, 10.0) - coverage(dist + 0.3 * w, 5.0);
+                buf.over(i, *colour, ring.clamp(0.0, 1.0));
+
+                let bar = coverage(
+                    segment_distance(px, py, 46.0, *cy, 68.0, *cy)
+                        + 0.5 * wobble(px, py, 6.0 + row as f32),
+                    2.4,
+                );
+                buf.over(i, PERIWINKLE, bar);
+            }
+
+            // The sketchy frame, with its one deliberate gap, drawn last so it
+            // stays crisp.
+            let frame =
+                (rbox(px, py, 48.0, 48.0, 31.0, 33.0, 15.0, 0.0) + wobble(px, py, 3.1)).abs();
+            let gap = segment_distance(px, py, 42.0, 15.0, 55.0, 15.0) + 0.6 * wobble(px, py, 9.0);
+            buf.over(
+                i,
+                PERIWINKLE,
+                coverage(frame, 2.6) * (1.0 - coverage(gap, 3.8)),
+            );
+        }
+    }
+
+    buf
+}
+
+/// Render the app icon at `size` pixels, returning PNG bytes.
+fn render_app(size: u32) -> Vec<u8> {
+    png::encode_rgba(size, size, &paint_app(size).to_bytes())
+}
+
+/// Path to the cached app icon (96x96 PNG), drawn on first use.
+pub fn app_icon() -> Option<PathBuf> {
+    let path = icon_cache_dir().join(format!("app-v{APP_ICON_VERSION}-{ICON_SIZE}.png"));
+    if fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false) {
+        return Some(path);
+    }
+    cached(&path, &render_app(ICON_SIZE))
+}
+
+/// Path to the cached app icon as an .ico -- the format a Start Menu shortcut
+/// needs -- bundled from one PNG per size.
+pub fn app_icon_ico() -> Option<PathBuf> {
+    let path = icon_cache_dir().join(format!("app-v{APP_ICON_VERSION}.ico"));
+    if fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false) {
+        return Some(path);
+    }
+    let entries: Vec<(u32, Vec<u8>)> = [16u32, 24, 32, 48, 64, 128, 256]
+        .into_iter()
+        .map(|size| (size, render_app(size)))
+        .collect();
+    let data = crate::ico::encode(
+        &entries
+            .iter()
+            .map(|(s, p)| (*s, p.as_slice()))
+            .collect::<Vec<_>>(),
+    );
+    cached(&path, &data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The icon paints its design: opaque on a ring's band, transparent
+    /// everywhere else -- middle, hole, and corners.
+    #[test]
+    fn app_icon_paints_the_design() {
+        let buf = paint_app(96);
+        let ring = &buf.data[(34 * 96 + 38) as usize];
+        assert!(ring[3] > 0.99, "ring band should be opaque");
+        let centre = &buf.data[(48 * 96 + 48) as usize];
+        assert!(centre[3] < 0.01, "centre should be transparent");
+        let corner = &buf.data[0];
+        assert!(corner[3] < 0.01, "corner should be transparent");
+    }
 }

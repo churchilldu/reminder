@@ -33,7 +33,8 @@ reminder <message> [options]
 Options:
     --title <text>        Notification title (default: Reminder)
     -l, --level <name>    Severity: info, success, warning, error (default: info)
-    --icon <path>         Custom image instead of the level icon
+    --icon <path|app>     Custom image instead of the level icon; 'app' uses
+                          the built-in app icon
     --url <url>           Clicking the notification body opens this URL
     --button <LABEL=URL>  Add a clickable button (repeatable, max 5)
     --silent              Suppress the notification sound
@@ -50,6 +51,7 @@ reminder "Build broke" --level error
 reminder "Meeting starting" --in 300
 reminder "Stand up" --repeat 4 --every 1800
 reminder "Review PR" --url https://github.com/notifications
+reminder "Focus time" --icon app
 reminder "Pipeline failed" \
     --level error \
     --button "Open logs=https://github.com/" \
@@ -64,7 +66,8 @@ reminder "Pipeline failed" \
 | `src/appid.rs` | Own AppUserModelId registration via a Start Menu shortcut |
 | `src/toast.rs` | Toast XML builder and the WinRT call that shows it        |
 | `src/level.rs` | The four severity levels: colour, glyph, sound            |
-| `src/icon.rs`  | Draws and caches the level icons                          |
+| `src/icon.rs`  | Draws and caches the level icons and the app icon         |
+| `src/ico.rs`   | Minimal ICO writer (PNG-compressed entries)               |
 | `src/png.rs`   | Minimal PNG encoder (CRC-32, Adler-32, stored DEFLATE)    |
 
 No image crate. No arg-parser crate. `windows` is the only dependency, which
@@ -91,13 +94,26 @@ RGBA, anti-aliased disc + glyph) and cached at
 `%LOCALAPPDATA%\reminder\icons`. First draw is a few dozen milliseconds;
 subsequent runs hit the cache in under a millisecond.
 
+**App icon.** The app's own identity is a hand-drawn reminder checklist, in
+the same spirit as the level icons — no bundled asset: a wobbly periwinkle
+frame with one deliberate sketch gap, and two coloured rings with their bars
+of text. Nothing else — the background, including the inside of the frame, is
+fully transparent. It is drawn procedurally on first use and cached like the
+level icons (a design version in the filename busts stale caches): a 96×96
+PNG (for toasts, via `--icon app`) and an `.ico`, a bundle of PNG-compressed
+entries (the only icon format a shortcut can carry — hence `ico.rs`), which
+`--register` attaches to the Start Menu shortcut via `SetIconLocation`.
+
 **AppID.** Toasts are shown under our own AppUserModelId (`Reminder.App`), not
 PowerShell's. On first use the app registers that identity by creating a Start
 Menu shortcut at `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Reminder.lnk`
 stamped with the `System.AppUserModel.ID` property -- the documented requirement
 for an unpackaged app to own a notification identity. The result: Action Center
-shows **"Reminder"** as the sender instead of "Windows PowerShell". See
-`appid.rs`. `--app-id` overrides the identity. Manage the registration explicitly
+shows **"Reminder"** as the sender instead of "Windows PowerShell". The
+shortcut also carries the app icon, so Start Menu and Action Center show the
+doodle checklist instead of the generic exe glyph. See
+`appid.rs`. `--app-id` overrides the identity. Manage the registration
+explicitly
 with `--register` / `--unregister`.
 
 **XML element order.** The toast schema requires `visual`, then `audio`, then

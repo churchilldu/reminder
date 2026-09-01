@@ -9,6 +9,7 @@
 
 mod appid;
 mod callback;
+mod ico;
 mod icon;
 mod level;
 mod png;
@@ -46,7 +47,8 @@ Options:
     --title <text>        Notification title (default: Reminder)
     -l, --level <name>    Severity: info, success, warning, error (default: info)
                           Sets the icon and the sound.
-    --icon <path>         Custom image instead of the level icon
+    --icon <path|app>     Custom image instead of the level icon; 'app' uses
+                          the built-in app icon
     --url <url>           Clicking the notification body opens this URL
     --on-click <cmd...>   Run a command when clicked (all args after this flag)
                           Requires --register-protocol to have been run once.
@@ -93,6 +95,7 @@ struct Args {
     title: String,
     level: &'static level::Level,
     icon: Option<PathBuf>,
+    app_icon: bool,
     url: Option<String>,
     on_click: Option<Vec<String>>,
     buttons: Vec<(String, String)>,
@@ -127,6 +130,7 @@ fn parse_args(argv: Vec<String>) -> Result<Parsed, UsageError> {
     let mut title = String::from("Reminder");
     let mut level_name = String::from("info");
     let mut icon: Option<String> = None;
+    let mut app_icon = false;
     let mut url: Option<String> = None;
     let mut on_click: Option<Vec<String>> = None;
     let mut button_specs: Vec<String> = Vec::new();
@@ -167,7 +171,14 @@ fn parse_args(argv: Vec<String>) -> Result<Parsed, UsageError> {
             }
             "--title" => title = value(&mut it, "--title")?,
             "-l" | "--level" => level_name = value(&mut it, "--level")?,
-            "--icon" => icon = Some(value(&mut it, "--icon")?),
+            "--icon" => {
+                let raw = value(&mut it, "--icon")?;
+                if raw == "app" {
+                    app_icon = true;
+                } else {
+                    icon = Some(raw);
+                }
+            }
             "--url" => url = Some(value(&mut it, "--url")?),
             "--on-click" => {
                 // Everything after --on-click is the command argv.
@@ -250,6 +261,7 @@ fn parse_args(argv: Vec<String>) -> Result<Parsed, UsageError> {
         title,
         level,
         icon,
+        app_icon,
         url,
         on_click,
         buttons,
@@ -264,11 +276,12 @@ fn parse_args(argv: Vec<String>) -> Result<Parsed, UsageError> {
 }
 
 fn run(args: Args) -> ExitCode {
-    // Fall back to the level's generated icon when no custom one was given.
-    let generated = if args.icon.is_none() {
-        icon::level_icon(args.level)
-    } else {
-        None
+    // Fall back to the level's generated icon when no custom one was given,
+    // or to the app icon when --icon app was.
+    let generated = match (&args.icon, args.app_icon) {
+        (Some(_), _) => None,
+        (None, true) => icon::app_icon(),
+        (None, false) => icon::level_icon(args.level),
     };
     let icon: Option<&Path> = args.icon.as_deref().or(generated.as_deref());
 
