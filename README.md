@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="app-icon.svg" width="128" alt="reminder app icon" />
+</p>
+
 # reminder
 
 A native Windows Notification Center reminder tool.
@@ -103,6 +107,8 @@ level icons (a design version in the filename busts stale caches): a 96×96
 PNG (for toasts, via `--icon app`) and an `.ico`, a bundle of PNG-compressed
 entries (the only icon format a shortcut can carry — hence `ico.rs`), which
 `--register` attaches to the Start Menu shortcut via `SetIconLocation`.
+The README banner is the same geometry exported to vector as `app-icon.svg`
+(generated from the same wobble math by `tools/gen-icon-svg.rs`).
 
 **AppID.** Toasts are shown under our own AppUserModelId (`Reminder.App`), not
 PowerShell's. On first use the app registers that identity by creating a Start
