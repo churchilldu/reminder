@@ -1,0 +1,8 @@
+- Add screenshot
+- Add flag to generate autocompletion script
+- Take url and callback as advance usage.
+- Readme add a example prompt to config the hook.
+- Usecase
+    - `<cmd> && reminder -l success <msg> || reminder -l error <msg>`
+    - agent prompt.
+        - preset popular agent as app that sends notificiation.
